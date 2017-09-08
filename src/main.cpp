@@ -44,8 +44,14 @@ double polyeval(Eigen::VectorXd coeffs, double x) {
 // Fit a polynomial.
 // Adapted from
 // https://github.com/JuliaMath/Polynomials.jl/blob/master/src/Polynomials.jl#L676-L716
-Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
+Eigen::VectorXd polyfit(vector<double> xs, vector<double> ys,
                         int order) {
+  Eigen::VectorXd xvals(xs.size()), yvals(ys.size());
+  for (int i=0; i<xs.size(); i++) {
+    xvals(i) = xs[i];
+    yvals(i) = ys[i];
+  }
+
   assert(xvals.size() == yvals.size());
   assert(order >= 1 && order <= xvals.size() - 1);
   Eigen::MatrixXd A(xvals.size(), order + 1);
@@ -98,13 +104,22 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
-          double steer_value;
-          double throttle_value;
+          Eigen::VectorXd coeffs = polyfit(ptsx, ptsy, 3);
+          Eigen::VectorXd state(6);
+          double cte=0, epsi=0;
+          cte = polyeval(coeffs, px) - py;
+          for (int i=1; i<coeffs.size(); i++)
+            epsi += i * coeffs[i] * pow(px,i-1);
+          epsi = psi - epsi;
+          state << px, py, psi, v, cte, epsi;
+          vector<double> rt = mpc.Solve(state, coeffs);
+          double steer_value = rt[6];
+          double throttle_value = rt[7];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = steer_value;
+          msgJson["steering_angle"] = steer_value/0.436332;
           msgJson["throttle"] = throttle_value;
 
           //Display the MPC predicted trajectory 
