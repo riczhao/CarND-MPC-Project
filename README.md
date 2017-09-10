@@ -56,18 +56,20 @@ I tried a few options and this is what I came up with:
 
 It needs a tradeoff between compution complexity and prediction accuracy.
 
-I played around with those parameters, and I chos N=10, dt=0.1
+I played around with those parameters, and I chose N=10, dt=0.1.
 
 ## 3. Polynomial Fitting and MPC Preprocessing
 
-I use order 3 to do poly fit. We'll need to translate the state to car co-ordinate system.
+I use order 3 to do poly fit. We'll need to translate the co-ordinates to car co-ordinate system.
 
 In the MPC I save the (x,y) of the future position estimations for plotting it on the simulator (green line).
 
 
-## 4. handle latency
+## 4. Model Predictive Control with Latency
 I advance the state by 0.1s before feed it to MPC.
 
+## 5. Simulation
+It can run well at 20MPH.
 
 
 ## Dependencies
