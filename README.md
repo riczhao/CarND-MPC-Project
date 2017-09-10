@@ -2,6 +2,73 @@
 Self-Driving Car Engineer Nanodegree Program
 
 ---
+## 1. The Model
+
+The model uses 6 element state vector, same as in quiz:
+
+	1,2) x,y : position
+	3) v: car speed
+	4) psi: car orientation
+	5) cte: cross track error
+	6) epsi: error in orientation
+
+It uses 2 actuators:
+
+	1) delta: stee angler
+	2) a: throttle
+
+The equations for updating the model (same as in quiz):
+
+	x_[t+1] = x[t] + v[t] * cos(psi[t]) * dt
+	y_[t+1] = y[t] + v[t] * sin(psi[t]) * dt
+	psi_[t+1] = psi[t] + v[t] / Lf * delta[t] * dt
+	v_[t+1] = v[t] + a[t] * dt
+	cte[t+1] = f(x[t]) - y[t] + v[t] * sin(epsi[t]) * dt
+	epsi[t+1] = psi[t] - atan(f'(x[t])) + v[t] * delta[t] / Lf * dt
+
+The model assumes the car runs along X. We'll transform the co-ordinates to car before feed to model.
+
+Number of variables and constraints:
+
+We'll need N states and N-1 actuators for variables.
+Totally it's 6*N+2*(N-1).
+
+Cost function:
+	cost = sum_N_steps(
+		w_cte * (cte^2) +                // errors: we want cte=0, espi=0, v=v_ref=30
+		w_espi * (espi^2) +
+		w_v * (v-ref_v^2) +
+		w_delta * (delta^2) +            // we want small actuators
+		w_a * (a^2) +
+		w_delta_diff * (delta_diff^2) +  // we want small change in the actuators - smooth drive
+		w_a_diff * (a_diff^2) +
+	)
+
+the different weights gives us the option to emphasize term that are more important to us then others.
+I tried a few options and this is what I came up with:
+
+- without latency: cost function weights = (1,1,1,1,100,100)
+- with latency: cost function weights = (1,1,1,1,1000,1000)
+- the v_ref was set to 20
+
+
+## 2. Timestep Length and Elapsed Duration
+
+It needs a tradeoff between compution complexity and prediction accuracy.
+
+I played around with those parameters, and I chos N=10, dt=0.1
+
+## 3. Polynomial Fitting and MPC Preprocessing
+
+I use order 3 to do poly fit. We'll need to translate the state to car co-ordinate system.
+
+In the MPC I save the (x,y) of the future position estimations for plotting it on the simulator (green line).
+
+
+## 4. handle latency
+I advance the state by 0.1s before feed it to MPC.
+
+
 
 ## Dependencies
 
@@ -19,7 +86,7 @@ Self-Driving Car Engineer Nanodegree Program
   * Run either `install-mac.sh` or `install-ubuntu.sh`.
   * If you install from source, checkout to commit `e94b6e1`, i.e.
     ```
-    git clone https://github.com/uWebSockets/uWebSockets 
+    git clone https://github.com/uWebSockets/uWebSockets
     cd uWebSockets
     git checkout e94b6e1
     ```
@@ -43,7 +110,7 @@ Self-Driving Car Engineer Nanodegree Program
        per this [forum post](https://discussions.udacity.com/t/incorrect-checksum-for-freed-object/313433/19).
   * Linux
     * You will need a version of Ipopt 3.12.1 or higher. The version available through `apt-get` is 3.11.x. If you can get that version to work great but if not there's a script `install_ipopt.sh` that will install Ipopt. You just need to download the source from the Ipopt [releases page](https://www.coin-or.org/download/source/Ipopt/).
-    * Then call `install_ipopt.sh` with the source directory as the first argument, ex: `sudo bash install_ipopt.sh Ipopt-3.12.1`. 
+    * Then call `install_ipopt.sh` with the source directory as the first argument, ex: `sudo bash install_ipopt.sh Ipopt-3.12.1`.
   * Windows: TODO. If you can use the Linux subsystem and follow the Linux instructions.
 * [CppAD](https://www.coin-or.org/CppAD/)
   * Mac: `brew install cppad`
