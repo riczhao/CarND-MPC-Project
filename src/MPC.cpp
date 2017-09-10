@@ -7,11 +7,13 @@
 
 using CppAD::AD;
 
+double polyeval(Eigen::VectorXd coeffs, double x);
+
 // We set the number of timesteps to 25
 // and the timestep evaluation frequency or evaluation
 // period to 0.05.
-size_t N = 25;
-double dt = 0.05;
+size_t N = 20;
+double dt = 0.1;
 
 // This value assumes the model presented in the classroom is used.
 //
@@ -27,7 +29,7 @@ const double Lf = 2.67;
 
 // Both the reference cross track and orientation errors are 0.
 // The reference velocity is set to 40 mph.
-double ref_v = 5;
+double ref_v = 10;
 
 // The solver takes all the state variables and actuator
 // variables in a singular vector. Thus, we should to establish
@@ -44,8 +46,11 @@ size_t a_start = delta_start + N - 1;
 class FG_eval {
  public:
   Eigen::VectorXd coeffs;
+
   // Coefficients of the fitted polynomial.
-  FG_eval(Eigen::VectorXd coeffs) { this->coeffs = coeffs; }
+  FG_eval(Eigen::VectorXd coeffs) {
+     this->coeffs = coeffs;
+  }
 
   typedef CPPAD_TESTVECTOR(AD<double>) ADvector;
   // `fg` is a vector containing the cost and constraints.
@@ -57,21 +62,21 @@ class FG_eval {
 
     // The part of the cost based on the reference state.
     for (int t = 0; t < N; t++) {
-      fg[0] += CppAD::pow(vars[cte_start + t], 2);
-      fg[0] += CppAD::pow(vars[epsi_start + t], 2) * 0.5;
-      fg[0] += CppAD::pow(vars[v_start + t] - ref_v, 2) * 0.25;
+      fg[0] += CppAD::pow(vars[cte_start + t], 2) * 500;
+      fg[0] += CppAD::pow(vars[epsi_start + t], 2) * 500;
+      fg[0] += CppAD::pow(vars[v_start + t] - ref_v, 2);
     }
 
     // Minimize the use of actuators.
     for (int t = 0; t < N - 1; t++) {
-      fg[0] += CppAD::pow(vars[delta_start + t], 2) * 0.1;
-      fg[0] += CppAD::pow(vars[a_start + t], 2) * 0.1;
+      fg[0] += CppAD::pow(vars[delta_start + t], 2);
+      fg[0] += CppAD::pow(vars[a_start + t], 2);
     }
 
     // Minimize the value gap between sequential actuations.
     for (int t = 0; t < N - 2; t++) {
-      fg[0] += CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2) * 0.1;
-      fg[0] += CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2) * 0.1;
+      fg[0] += CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2) * 500;
+      fg[0] += CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
     }
 
     //
@@ -121,6 +126,7 @@ class FG_eval {
       for (int i=1; i<coeffs.size(); i++) {
         psides0 += i * coeffs[i] * CppAD::pow(x0,i-1);
       }
+      psides0 = CppAD::atan(psides0);
 
       // Here's `x` to get you started.
       // The idea here is to constraint this value to be 0.
@@ -138,12 +144,29 @@ class FG_eval {
       fg[1 + v_start + t] = v1 - (v0 + a0 * dt);
       fg[1 + cte_start + t] =
           cte1 - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
+      psides0 = (psi0 - psides0) + v0 * delta0 / Lf * dt;
       fg[1 + epsi_start + t] =
-          epsi1 - ((psi0 - psides0) + v0 * delta0 / Lf * dt);
+          epsi1 - psides0;
     }
   }
 };
 
+typedef CPPAD_TESTVECTOR(double) Dvector;
+
+static void print_cost(Dvector &vars)
+{
+  std::cout << "vars: " << vars << std::endl;
+  int t = 0;
+  std::cout << CppAD::pow(vars[cte_start + t], 2) << std::endl;
+  std::cout << CppAD::pow(vars[epsi_start + t], 2) << std::endl;
+  std::cout << CppAD::pow(vars[v_start + t] - ref_v, 2) << std::endl;
+
+  std::cout << CppAD::pow(vars[delta_start + t], 2) << std::endl;
+  std::cout << CppAD::pow(vars[a_start + t], 2) << std::endl;
+
+  std::cout << CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2) << std::endl;
+  std::cout << CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2) << std::endl;
+}
 //
 // MPC class definition
 //
@@ -151,16 +174,32 @@ class FG_eval {
 MPC::MPC() {}
 MPC::~MPC() {}
 
+static void move(double &x, double &y, double &psi, double &v, double &a, double &delta, double &dt) {
+  x += v * cos(psi) * dt;
+  y += v * sin(psi) * dt;
+  psi += v / Lf * delta * dt;
+  v += a * dt;
+}
+
 vector<double> MPC::Solve(Eigen::VectorXd x0, Eigen::VectorXd coeffs) {
   size_t i;
-  typedef CPPAD_TESTVECTOR(double) Dvector;
 
   double x = x0[0];
   double y = x0[1];
   double psi = x0[2];
   double v = x0[3];
-  double cte = x0[4];
-  double epsi = x0[5];
+  double cte = 0.;
+  double epsi = 0.;
+  double delta = x0[4];
+  double a = x0[5];
+  double latency = 0.1;
+
+  move(x, y, psi, v, a, delta, latency); 
+  cte = polyeval(coeffs, x) - y;
+  for (int i=1; i<coeffs.size(); i++)
+    epsi += i * coeffs[i] * pow(x,i-1);
+  epsi = atan(epsi);
+  epsi = psi - epsi;
 
   // number of independent variables
   // N timesteps == N - 1 actuations
@@ -256,10 +295,22 @@ vector<double> MPC::Solve(Eigen::VectorXd x0, Eigen::VectorXd coeffs) {
 
   auto cost = solution.obj_value;
   std::cout << "Cost " << cost << std::endl;
-  return {solution.x[x_start + 1],   solution.x[y_start + 1],
-          solution.x[psi_start + 1], solution.x[v_start + 1],
-          solution.x[cte_start + 1], solution.x[epsi_start + 1],
-          solution.x[delta_start],   solution.x[a_start]};
+  print_cost(solution.x);
+  vector<double> rt;
+  rt.push_back(solution.x[delta_start]);
+  rt.push_back(solution.x[a_start]);
+  for (int i=0; i<N; i++) {
+    double xt,yt,xd,yd;
+    xt = solution.x[x_start + i];
+    yt = solution.x[y_start + i];
+    xt -= x;
+    yt -= y;
+    xd = xt * cos(psi) + yt * sin(psi);
+    yd = yt * cos(psi) - xt * sin(psi);
+    rt.push_back(xd);
+    rt.push_back(yd);
+  }
+  return rt;
 }
 
 #if 0
@@ -312,6 +363,7 @@ int main() {
   ptsx << -32.16173,-43.49173,-61.09,-78.29172,-93.05002,-107.7717;
   ptsy << 113.361,105.941,92.88499,78.73102,65.34102,50.57938;
 
+  bool reverse = ptsx[0]>ptsx[ptsx.size()-1];
   // The polynomial is fitted to a straight line so a polynomial with
   // order 1 is sufficient.
   auto coeffs = polyfit(ptsx, ptsy, 3);
@@ -320,13 +372,28 @@ int main() {
   double x = -40.62008;
   double y = 108.7301;
   double psi = 3.733667;
-  double v = 10.;
+  double v = 2.999254E-06;
   // The cross track error is calculated by evaluating at polynomial at x, f(x)
   // and subtracting y.
   double cte = polyeval(coeffs, x) - y;
   // Due to the sign starting at 0, the orientation error is -f'(x).
   // derivative of coeffs[0] + coeffs[1] * x -> coeffs[1]
-  double epsi = psi - atan(coeffs[1]);
+  double epsi = 0;//psi - atan(coeffs[1]);
+  for (int i=1; i<coeffs.size(); i++) {
+    epsi += i * coeffs[i] * pow(x,i-1);
+  }
+  epsi = CppAD::atan(epsi);
+  epsi = reverse ? epsi + M_PI : epsi;
+  epsi = psi - epsi;
+  while (true) {
+    if (epsi > M_PI)
+      epsi -= 2*M_PI;
+    else if (epsi < -M_PI)
+      epsi += 2*M_PI;
+    else
+      break;
+  }
+  std::cout << "epsi0: " << epsi << std::endl;
 
   Eigen::VectorXd state(6);
   state << x, y, psi, v, cte, epsi;

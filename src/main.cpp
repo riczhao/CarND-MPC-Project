@@ -97,6 +97,28 @@ int main() {
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
+          v *= 0.44704; // mph to m/s
+          double c_steer = j[1]["steering_angle"];
+          c_steer = -c_steer;
+          double c_throttle = j[1]["throttle"];
+
+          bool reverse = ptsx[0] > ptsx[ptsx.size()-1];
+
+          Eigen::VectorXd coeffs = polyfit(ptsx, ptsy, 3);
+
+          // convert to track coordinate system
+          double co_x, co_y, co_psi;
+          closest_point(coeffs, px, py, &co_x, &co_y, &co_psi, reverse);
+          vector<double> ptsx_dst(ptsx.size()), ptsy_dst(ptsy.size());
+          for (int i=0; i<ptsx.size(); i++) {
+             double x_t=ptsx[i], y_t=ptsy[i];
+             state_transform(co_x, co_y, co_psi, &x_t, &y_t, NULL);
+             ptsx_dst[i] = x_t;
+             ptsy_dst[i] = y_t;
+          }
+          Eigen::VectorXd coeffs_dst = polyfit(ptsx_dst, ptsy_dst, 3);
+          double px_dst=px, py_dst=py, psi_dst=psi;
+          state_transform(co_x, co_y, co_psi, &px_dst, &py_dst, &psi_dst);
 
           /*
           * TODO: Calculate steering angle and throttle using MPC.
@@ -104,17 +126,11 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
-          Eigen::VectorXd coeffs = polyfit(ptsx, ptsy, 3);
           Eigen::VectorXd state(6);
-          double cte=0, epsi=0;
-          cte = polyeval(coeffs, px) - py;
-          for (int i=1; i<coeffs.size(); i++)
-            epsi += i * coeffs[i] * pow(px,i-1);
-          epsi = psi - epsi;
-          state << px, py, psi, v, cte, epsi;
-          vector<double> rt = mpc.Solve(state, coeffs);
-          double steer_value = rt[6];
-          double throttle_value = rt[7];
+          state << px_dst, py_dst, psi_dst, v,c_steer , c_throttle;
+          vector<double> rt = mpc.Solve(state, coeffs_dst);
+          double steer_value = -rt[0];
+          double throttle_value = rt[1];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
@@ -129,6 +145,10 @@ int main() {
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
 
+          for (int i=2; i<rt.size(); i+=2) {
+            mpc_x_vals.push_back(rt[i]);
+            mpc_y_vals.push_back(rt[i+1]);
+          }
           msgJson["mpc_x"] = mpc_x_vals;
           msgJson["mpc_y"] = mpc_y_vals;
 
@@ -138,6 +158,18 @@ int main() {
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
+
+          for (int i=0; i<ptsx.size(); i++) {
+            double xt,yt,xd,yd;
+            xt = ptsx[i];
+            yt = ptsy[i];
+            xt -= px;
+            yt -= py;
+            xd = xt * cos(psi) + yt * sin(psi);
+            yd = yt * cos(psi) - xt * sin(psi);
+            next_x_vals.push_back(xd);
+            next_y_vals.push_back(yd);
+          }
 
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
